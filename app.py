@@ -5,167 +5,193 @@ from model_engine import train_model, predict_energy
 from optimizer import detect_inefficiency
 from dashboard import render_dashboard
 
+# Clean PDF imports (minimal + stable)
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import inch
 
-def main():
-    st.set_page_config(layout="wide")
 
-    # -----------------------
-    # Load & Train
-    # -----------------------
-    base_df = generate_data()
-    model = train_model(base_df)
+st.set_page_config(layout="wide")
 
-    base_df["prediction"] = predict_energy(model, base_df)
 
-    # -----------------------
-    # What-If Scenario Simulator
-    # -----------------------
-    st.markdown("## ⚙️ What-If Scenario Simulator")
-    st.caption("Simulate operational changes before implementation.")
+# -----------------------
+# Cached Model Loading
+# -----------------------
+@st.cache_resource
+def load_and_train():
+    df = generate_data()
+    model = train_model(df)
+    return df, model
 
-    occupancy_increase = st.slider("Occupancy Increase (%)", 0, 50, 0)
-    extra_hours = st.slider("Extend Working Hours (hours/day)", 0, 4, 0)
-    hvac_adjustment = st.slider("HVAC Load Adjustment (%)", -20, 30, 0)
 
-    df = base_df.copy()
+base_df, model = load_and_train()
+base_df["prediction"] = predict_energy(model, base_df)
 
-    # Apply occupancy adjustment
-    df["occupancy"] *= (1 + occupancy_increase / 100)
 
-    # Extend working hours impact
-    if extra_hours > 0:
-        extended_mask = df["hour"].between(18, 18 + extra_hours)
-        df.loc[extended_mask, "occupancy"] *= 1.2
+# -----------------------
+# Sidebar Navigation
+# -----------------------
+st.sidebar.title("⚡ EnergySense Navigation")
 
-    # HVAC adjustment via temperature
-    df["temperature"] *= (1 + hvac_adjustment / 100)
+page = st.sidebar.radio(
+    "Select View",
+    ["Executive Overview", "Optimization", "Climate", "Technical Dashboard"]
+)
 
-    # Predict new energy
-    df["prediction"] = predict_energy(model, df)
+role = st.sidebar.selectbox(
+    "User Role",
+    ["Executive", "Facility Manager", "Sustainability Officer"]
+)
 
-    # Detect inefficiency
-    df = detect_inefficiency(df)
+st.sidebar.markdown("---")
 
-    # -----------------------
-    # Energy Performance Overview
-    # -----------------------
-    st.markdown("## 📊 Energy Performance Overview")
+occupancy_increase = st.sidebar.slider("Occupancy Increase (%)", 0, 50, 0)
+extra_hours = st.sidebar.slider("Extend Working Hours", 0, 4, 0)
+hvac_adjustment = st.sidebar.slider("HVAC Adjustment (%)", -20, 30, 0)
 
-    actual_energy = base_df["energy_kwh"].sum()
-    predicted_energy = df["prediction"].sum()
-    energy_difference = predicted_energy - actual_energy
 
-    cost_per_kwh = 8
-    actual_cost = actual_energy * cost_per_kwh
-    predicted_cost = predicted_energy * cost_per_kwh
-    cost_difference = predicted_cost - actual_cost
+# -----------------------
+# Scenario Simulation
+# -----------------------
+df = base_df.copy()
 
-    col1, col2 = st.columns(2)
+df["occupancy"] *= (1 + occupancy_increase / 100)
 
-    with col1:
-        st.markdown("### ⚡ Energy Comparison")
+if extra_hours > 0:
+    extended_mask = df["hour"].between(18, 18 + extra_hours)
+    df.loc[extended_mask, "occupancy"] *= 1.2
 
-        st.metric(
-            "Actual Total Energy (kWh)",
-            round(actual_energy, 2)
-        )
+df["temperature"] *= (1 + hvac_adjustment / 100)
 
-        st.metric(
-            "Predicted Total Energy (kWh)",
-            round(predicted_energy, 2),
-            delta=round(energy_difference, 2),
-            delta_color="inverse"
-        )
+df["prediction"] = predict_energy(model, df)
+df = detect_inefficiency(df)
 
-    with col2:
-        st.markdown("### 💰 Cost Comparison")
 
-        st.metric(
-            "Actual Energy Cost (₹)",
-            round(actual_cost, 2)
-        )
+# -----------------------
+# Core Metrics
+# -----------------------
+actual_energy = base_df["energy_kwh"].sum()
+predicted_energy = df["prediction"].sum()
+cost_per_kwh = 8
+predicted_cost = predicted_energy * cost_per_kwh
 
-        st.metric(
-            "Predicted Energy Cost (₹)",
-            round(predicted_cost, 2),
-            delta=round(cost_difference, 2),
-            delta_color="inverse"
-        )
+inefficient_df = df[df["inefficiency_flag"]]
+waste_energy = inefficient_df["prediction"].sum()
 
-    # -----------------------
-    # Climate Impact Analyzer
-    # -----------------------
-    st.markdown("## 🌍 Climate Impact Analyzer")
-    st.caption("Measure carbon footprint impact of operational decisions.")
+emission_factor = 0.82
+co2_per_tree = 21
+predicted_emissions = predicted_energy * emission_factor
+trees_required = predicted_emissions / co2_per_tree
 
-    emission_factor = 0.82  # kg CO2 per kWh (India average)
+efficiency_score = int((1 - len(inefficient_df)/len(df)) * 100)
 
-    actual_emissions = actual_energy * emission_factor
-    predicted_emissions = predicted_energy * emission_factor
-    emission_change = predicted_emissions - actual_emissions
 
-    colA, colB = st.columns(2)
+# -----------------------
+# Executive Overview Page
+# -----------------------
+if page == "Executive Overview":
 
-    colA.metric(
-        "Projected CO₂ Emissions (kg)",
-        round(predicted_emissions, 2),
-        delta=round(emission_change, 2),
+    st.title("📊 Executive Energy Overview")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Predicted Energy (kWh)", round(predicted_energy, 2))
+    col2.metric("Predicted Cost (₹)", round(predicted_cost, 2))
+    col3.metric("Efficiency Score", f"{efficiency_score}/100")
+
+    st.subheader("🏭 Industry Benchmark Comparison")
+
+    industry_avg = actual_energy * 1.15
+    benchmark_diff = predicted_energy - industry_avg
+
+    st.metric(
+        "Industry Benchmark Energy (kWh)",
+        round(industry_avg, 2),
+        delta=round(benchmark_diff, 2),
         delta_color="inverse"
     )
 
-    trees_equivalent = predicted_emissions / 21
-    colB.metric(
-        "Equivalent Trees Required",
-        round(trees_equivalent, 1)
-    )
+    comparison_text = "more efficient" if predicted_energy < industry_avg else "less efficient"
+    st.info(f"Your system is {comparison_text} compared to industry average.")
 
-    # -----------------------
-    # Optimization Recommendations
-    # -----------------------
-    st.markdown("## 💡 Optimization Recommendations")
-    st.caption("AI-driven suggestions to reduce energy waste and lower operational costs.")
 
-    inefficient_df = df[df["inefficiency_flag"]]
+# -----------------------
+# Optimization Page
+# -----------------------
+elif page == "Optimization":
 
-    if inefficient_df.empty:
-        st.success("No major inefficiencies detected. Current configuration is optimized.")
-    else:
-        avg_waste_percent = inefficient_df["estimated_waste_percent"].mean()
+    st.title("⚡ Optimization Insights")
 
-        potential_savings_kwh = inefficient_df["prediction"].sum() * 0.15
-        potential_savings_cost = potential_savings_kwh * cost_per_kwh
+    st.metric("Waste Energy (kWh)", round(waste_energy, 2))
 
-        st.warning(
-            f"Average waste during flagged periods is approximately {round(avg_waste_percent, 2)}%."
-        )
+    optimized_energy = predicted_energy - (waste_energy * 0.15)
+    optimized_cost = optimized_energy * cost_per_kwh
 
-        st.markdown("### 🔧 Suggested Actions")
-        st.markdown(
-            "- Adjust HVAC scheduling during low occupancy hours.\n"
-            "- Reduce cooling/heating load after working hours.\n"
-            "- Implement occupancy-based automation systems.\n"
-            "- Optimize temperature setpoints by 1–2°C."
-        )
+    colA, colB = st.columns(2)
+    colA.metric("Optimized Energy Target (kWh)", round(optimized_energy, 2))
+    colB.metric("Optimized Cost Target (₹)", round(optimized_cost, 2))
 
-        st.markdown("### 💰 Potential Savings Estimate")
+    st.markdown("### 💡 Recommended Actions")
+    st.markdown("""
+    - Optimize HVAC setpoints  
+    - Introduce occupancy sensors  
+    - Reduce after-hours consumption  
+    - Implement predictive maintenance  
+    """)
 
-        colS1, colS2 = st.columns(2)
 
-        colS1.metric(
-            "Potential Energy Savings (kWh)",
-            round(potential_savings_kwh, 2)
-        )
+# -----------------------
+# Climate Page
+# -----------------------
+elif page == "Climate":
 
-        colS2.metric(
-            "Potential Cost Reduction (₹)",
-            round(potential_savings_cost, 2)
-        )
+    st.title("🌍 Climate Impact")
 
-    # -----------------------
-    # Render Main Dashboard
-    # -----------------------
+    col1, col2 = st.columns(2)
+    col1.metric("Projected CO₂ Emissions (kg)", round(predicted_emissions, 2))
+    col2.metric("Trees Required for Offset", int(round(trees_required, 0)))
+
+    st.progress(min(predicted_emissions / (actual_energy * emission_factor * 1.3), 1))
+
+
+# -----------------------
+# Technical Dashboard
+# -----------------------
+elif page == "Technical Dashboard":
+
+    st.title("🔬 Technical Energy Dashboard")
     render_dashboard(df)
 
 
-if __name__ == "__main__":
-    main()
+# -----------------------
+# PDF Report Generator
+# -----------------------
+st.sidebar.markdown("---")
+
+if st.sidebar.button("Download Executive PDF Report"):
+
+    doc = SimpleDocTemplate("EnergySense_Report.pdf")
+    elements = []
+    styles = getSampleStyleSheet()
+
+    elements.append(Paragraph("EnergySense Executive Report", styles["Heading1"]))
+    elements.append(Spacer(1, 0.3 * inch))
+
+    elements.append(Paragraph(f"Predicted Energy: {round(predicted_energy, 2)} kWh", styles["Normal"]))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    elements.append(Paragraph(f"Predicted Cost: ₹{round(predicted_cost, 2)}", styles["Normal"]))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    elements.append(Paragraph(f"CO₂ Emissions: {round(predicted_emissions, 2)} kg", styles["Normal"]))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    elements.append(Paragraph(f"Trees Required for Offset: {int(round(trees_required, 0))}", styles["Normal"]))
+
+    doc.build(elements)
+
+    with open("EnergySense_Report.pdf", "rb") as file:
+        st.sidebar.download_button(
+            "Click to Download Report",
+            file,
+            file_name="EnergySense_Report.pdf"
+        )
