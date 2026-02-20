@@ -3,51 +3,89 @@ import pandas as pd
 
 
 def render_dashboard(df):
-    st.title("EnergySense")
-    st.write("Predictive energy optimization dashboard for smart buildings")
 
-    st.subheader("Key Metrics")
-    st.caption("Overview of building energy performance")
+    st.markdown("## 🔬 Technical Energy Dashboard")
 
-    col1, col2, col3 = st.columns(3)
+    # =====================================================
+    # BASIC METRICS
+    # =====================================================
 
-    col1.metric(
-        "Average Energy (kWh)",
-        round(df["energy_kwh"].mean(), 2)
-    )
+    avg_actual = df["energy_kwh"].mean()
+    avg_predicted = df["prediction"].mean()
 
     peak_hour = (
-        df.groupby("hour")["energy_kwh"]
+        df.groupby("hour")["prediction"]
         .mean()
         .idxmax()
     )
-    col2.metric("Peak Hour", peak_hour)
 
-    col3.metric(
-        "Inefficient Periods",
-        int(df["inefficiency_flag"].sum())
-    )
-
-    # Live inefficiency feedback
     inefficient_count = int(df["inefficiency_flag"].sum())
 
-    if inefficient_count == 0:
-        st.success("✅ No inefficiencies detected under current threshold.")
-    else:
-        st.error(f"⚠ {inefficient_count} inefficient periods detected.")
+    col1, col2, col3, col4 = st.columns(4)
 
-    st.subheader("Energy Usage: Actual vs Predicted")
-    st.caption("Model prediction vs actual consumption trends")
+    col1.metric("Avg Actual (kWh)", round(avg_actual, 2))
+    col2.metric("Avg Predicted (kWh)", round(avg_predicted, 2))
+    col3.metric("Peak Load Hour", f"{peak_hour}:00")
+    col4.metric("Inefficient Periods", inefficient_count)
 
-    chart_df = df[["energy_kwh", "prediction"]]
-    st.line_chart(chart_df)
+    st.markdown("---")
 
-    if df["inefficiency_flag"].any():
+    # =====================================================
+    # ACTUAL VS PREDICTED TREND
+    # =====================================================
+
+    st.subheader("Actual vs Predicted Energy Trend")
+
+    trend_df = df[["energy_kwh", "prediction"]].copy()
+    trend_df.columns = ["Actual Energy", "Predicted Energy"]
+
+    st.line_chart(trend_df)
+
+    st.markdown("---")
+
+    # =====================================================
+    # HOURLY LOAD PROFILE
+    # =====================================================
+
+    st.subheader("Hourly Load Profile (Average)")
+
+    hourly_profile = (
+        df.groupby("hour")[["energy_kwh", "prediction"]]
+        .mean()
+        .reset_index()
+    )
+
+    hourly_profile.set_index("hour", inplace=True)
+    hourly_profile.columns = ["Actual", "Predicted"]
+
+    st.line_chart(hourly_profile)
+
+    st.markdown("---")
+
+    # =====================================================
+    # TOP INEFFICIENT PERIODS
+    # =====================================================
+
+    inefficient_df = df[df["inefficiency_flag"]]
+
+    if not inefficient_df.empty:
+
         st.subheader("Top Inefficient Periods")
-        st.caption("Periods where energy usage exceeded expected levels under low occupancy.")
 
-        inefficient_df = df[df["inefficiency_flag"]][
-            ["hour", "occupancy", "energy_kwh", "estimated_waste_percent"]
-        ].sort_values("estimated_waste_percent", ascending=False)
+        display_cols = [
+            "hour",
+            "occupancy",
+            "energy_kwh",
+            "prediction",
+            "estimated_waste_percent"
+        ]
 
-        st.dataframe(inefficient_df.head(10))
+        st.dataframe(
+            inefficient_df[display_cols]
+            .sort_values("estimated_waste_percent", ascending=False)
+            .head(10),
+            use_container_width=True
+        )
+
+    else:
+        st.success("No inefficiencies detected in current scenario.")
