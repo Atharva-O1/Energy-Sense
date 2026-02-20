@@ -17,8 +17,17 @@ def main():
     # Step 3: Predict energy
     df["prediction"] = predict_energy(model, df)
 
-    # Step 4: Detect inefficiencies
-    df = detect_inefficiency(df)
+    # --- What-If Control (PUT IT HERE) ---
+    threshold = st.slider(
+        "Occupancy Threshold for Inefficiency Detection",
+        min_value=10,
+        max_value=60,
+        value=30,
+        help="If occupancy falls below this value while energy is high, it is flagged as inefficient."
+    )
+
+    # Step 4: Apply inefficiency detection
+    df = detect_inefficiency(df, occupancy_threshold=threshold)
 
     # Step 5: Render dashboard
     render_dashboard(df)
