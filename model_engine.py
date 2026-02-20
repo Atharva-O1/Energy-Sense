@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 
@@ -8,6 +9,7 @@ FEATURE_COLUMNS = [
     "occupancy",
     "is_weekend"
 ]
+
 
 def train_model(df):
     X = df[FEATURE_COLUMNS]
@@ -25,10 +27,13 @@ def train_model(df):
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
-    rmse = mean_squared_error(y_test, y_pred, squared=False)
+
+    # Compatible RMSE calculation (works in all sklearn versions)
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
     print(f"[Model] RMSE: {rmse:.2f}")
 
     return model
+
 
 def predict_energy(model, df):
     X = df[FEATURE_COLUMNS]
