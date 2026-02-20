@@ -1,90 +1,103 @@
 import streamlit as st
-import re
+import numpy as np
 from data_engine import generate_data
 from model_engine import train_model, predict_energy
 from optimizer import detect_inefficiency
 from dashboard import render_dashboard
 
 
-def extract_threshold(question):
-    numbers = re.findall(r'\d+', question)
-    if numbers:
-        value = int(numbers[0])
-        if 10 <= value <= 60:
-            return value
-    return None
-
-
 def main():
     st.set_page_config(layout="wide")
 
-    # Step 1: Load data
-    df = generate_data()
+    # Load base data
+    base_df = generate_data()
 
-    # Step 2: Train model
-    model = train_model(df)
+    # Train model once
+    model = train_model(base_df)
 
-    # Step 3: Predict energy
+    st.markdown("## ⚙️ What-If Scenario Simulator")
+    st.caption("Simulate operational changes before they happen.")
+
+    # -----------------------
+    # Simulation Controls
+    # -----------------------
+    occupancy_increase = st.slider(
+        "What if occupancy increases by (%)",
+        0, 50, 0
+    )
+
+    extra_hours = st.slider(
+        "What if working hours extend by (hours per day)",
+        0, 4, 0
+    )
+
+    hvac_adjustment = st.slider(
+        "What if HVAC load increases by (%)",
+        -20, 30, 0
+    )
+
+    # Copy dataframe for scenario
+    df = base_df.copy()
+
+    # Apply occupancy change
+    df["occupancy"] = df["occupancy"] * (1 + occupancy_increase / 100)
+
+    # Apply working hour extension
+    if extra_hours > 0:
+        extended_mask = df["hour"].between(18, 18 + extra_hours)
+        df.loc[extended_mask, "occupancy"] *= 1.2
+
+    # Apply HVAC adjustment (via temperature impact)
+    df["temperature"] = df["temperature"] * (1 + hvac_adjustment / 100)
+
+    # Predict new energy
     df["prediction"] = predict_energy(model, df)
 
-    # ---------------------------------
-    # What-If Question Section
-    # ---------------------------------
-    st.markdown("## 🤔 Ask a What-If Question")
-    st.caption("Example: 'What if occupancy threshold is 45?'")
+    # Detect inefficiency
+    df = detect_inefficiency(df)
 
-    question = st.text_input("Type your what-if question here:")
+    # -----------------------
+    # Impact Metrics
+    # -----------------------
+    baseline_energy = base_df["energy_kwh"].sum()
+    scenario_energy = df["prediction"].sum()
 
-    # Baseline
-    baseline_df = detect_inefficiency(df.copy(), occupancy_threshold=30)
-    baseline_count = int(baseline_df["inefficiency_flag"].sum())
-    baseline_waste = baseline_df[baseline_df["inefficiency_flag"]]["energy_kwh"].sum()
+    energy_change = scenario_energy - baseline_energy
 
-    scenario_threshold = 30  # default
+    st.markdown("### 📊 Scenario Impact")
 
-    if question:
-        extracted = extract_threshold(question)
-        if extracted:
-            scenario_threshold = extracted
-        else:
-            st.warning("Please include a threshold value between 10 and 60 in your question.")
+    col1, col2 = st.columns(2)
 
-    # Scenario calculation
-    scenario_df = detect_inefficiency(df.copy(), occupancy_threshold=scenario_threshold)
-    scenario_count = int(scenario_df["inefficiency_flag"].sum())
-    scenario_waste = scenario_df[scenario_df["inefficiency_flag"]]["energy_kwh"].sum()
+    col1.metric(
+        "Predicted Total Energy (kWh)",
+        round(scenario_energy, 2),
+        delta=round(energy_change, 2)
+    )
 
-    # Replace df with scenario result
-    df = scenario_df
-
-    # Cost calculation
     cost_per_kwh = 8
-    scenario_cost = scenario_waste * cost_per_kwh
-    baseline_cost = baseline_waste * cost_per_kwh
-    cost_difference = scenario_cost - baseline_cost
+    cost_impact = energy_change * cost_per_kwh
 
-    # Display Answer
-    if question:
-        st.markdown("### 📊 Scenario Answer")
+    col2.metric(
+        "Estimated Cost Impact (₹)",
+        round(scenario_energy * cost_per_kwh, 2),
+        delta=round(cost_impact, 2)
+    )
 
-        st.write(
-            f"If occupancy threshold is set to **{scenario_threshold}**, "
-            f"the system detects **{scenario_count} inefficient periods**, "
-            f"compared to **{baseline_count} under baseline (30)**."
+    # Smart Explanation
+    st.markdown("### 🧠 Insight")
+
+    if energy_change > 0:
+        st.warning(
+            "Operational changes increase projected energy consumption. "
+            "Consider optimizing HVAC schedules or load balancing."
         )
-
-        if scenario_count > baseline_count:
-            st.error(
-                f"This increases detected inefficiencies by {scenario_count - baseline_count} periods "
-                f"and raises estimated cost exposure by ₹{round(cost_difference, 2)}."
-            )
-        elif scenario_count < baseline_count:
-            st.success(
-                f"This reduces flagged inefficiencies by {baseline_count - scenario_count} periods "
-                f"and lowers projected cost exposure by ₹{abs(round(cost_difference, 2))}."
-            )
-        else:
-            st.info("This threshold produces the same inefficiency detection as baseline.")
+    elif energy_change < 0:
+        st.success(
+            "Scenario reduces projected energy consumption. "
+            "This configuration improves operational efficiency."
+        )
+    else:
+        st.info("No operational impact detected.")
 
     # Render dashboard
     render_dashboard(df)
