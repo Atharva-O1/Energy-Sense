@@ -1,11 +1,11 @@
 import streamlit as st
 import numpy as np
+import pandas as pd
+import requests
 from data_engine import generate_data
 from model_engine import train_model, predict_energy
 from optimizer import detect_inefficiency
 from dashboard import render_dashboard
-
-# Clean PDF imports (minimal + stable)
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -14,28 +14,86 @@ from reportlab.lib.units import inch
 st.set_page_config(layout="wide")
 
 
-# -----------------------
-# Cached Model Loading
-# -----------------------
-@st.cache_resource
-def load_and_train():
-    df = generate_data()
-    model = train_model(df)
-    return df, model
+# ======================================================
+# DATA SOURCE SELECTION
+# ======================================================
+st.sidebar.title("🔌 Data Source")
+
+data_source = st.sidebar.radio(
+    "Select Data Source",
+    ["Simulated Building Data", "External Building API"]
+)
 
 
-base_df, model = load_and_train()
+def fetch_external_data(api_url, api_key):
+    try:
+        headers = {"Authorization": f"Bearer {api_key}"}
+        response = requests.get(api_url, headers=headers, timeout=5)
+
+        if response.status_code == 200:
+            data = response.json()
+            df = pd.DataFrame(data)
+            return df
+        else:
+            st.error("API connection failed.")
+            return None
+    except Exception:
+        st.error("Error connecting to building system.")
+        return None
+
+
+# ======================================================
+# LOAD DATA BASED ON SOURCE
+# ======================================================
+if data_source == "Simulated Building Data":
+
+    @st.cache_resource
+    def load_and_train():
+        df = generate_data()
+        model = train_model(df)
+        return df, model
+
+    base_df, model = load_and_train()
+    st.sidebar.success("Using simulated building data.")
+
+else:
+
+    st.sidebar.markdown("### API Configuration")
+
+    api_url = st.sidebar.text_input("Building API URL")
+    api_key = st.sidebar.text_input("API Key", type="password")
+
+    if api_url and api_key:
+        base_df = fetch_external_data(api_url, api_key)
+
+        if base_df is not None:
+            st.sidebar.success("Connected to Building Management System")
+            model = train_model(base_df)
+        else:
+            st.stop()
+    else:
+        st.sidebar.warning("Enter API credentials to connect.")
+        st.stop()
+
+
+# Run prediction
 base_df["prediction"] = predict_energy(model, base_df)
 
 
-# -----------------------
-# Sidebar Navigation
-# -----------------------
-st.sidebar.title("⚡ EnergySense Navigation")
+# ======================================================
+# SIDEBAR NAVIGATION
+# ======================================================
+st.sidebar.markdown("---")
 
 page = st.sidebar.radio(
     "Select View",
-    ["Executive Overview", "Optimization", "Climate", "Technical Dashboard"]
+    [
+        "Executive Overview",
+        "Optimization",
+        "Climate",
+        "Usage Analyzer",
+        "Technical Dashboard"
+    ]
 )
 
 role = st.sidebar.selectbox(
@@ -45,14 +103,14 @@ role = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 
-occupancy_increase = st.sidebar.slider("Occupancy Increase (%)", 0, 50, 0)
-extra_hours = st.sidebar.slider("Extend Working Hours", 0, 4, 0)
-hvac_adjustment = st.sidebar.slider("HVAC Adjustment (%)", -20, 30, 0)
+occupancy_increase = st.sidebar.slider("Occupancy Increase (%)", 0, 150, 0)
+extra_hours = st.sidebar.slider("Extend Working Hours", 0, 12, 0)
+hvac_adjustment = st.sidebar.slider("HVAC Adjustment (%)", -40, 60, 0)
 
 
-# -----------------------
-# Scenario Simulation
-# -----------------------
+# ======================================================
+# SCENARIO SIMULATION
+# ======================================================
 df = base_df.copy()
 
 df["occupancy"] *= (1 + occupancy_increase / 100)
@@ -67,9 +125,9 @@ df["prediction"] = predict_energy(model, df)
 df = detect_inefficiency(df)
 
 
-# -----------------------
-# Core Metrics
-# -----------------------
+# ======================================================
+# CORE METRICS
+# ======================================================
 actual_energy = base_df["energy_kwh"].sum()
 predicted_energy = df["prediction"].sum()
 cost_per_kwh = 8
@@ -86,37 +144,37 @@ trees_required = predicted_emissions / co2_per_tree
 efficiency_score = int((1 - len(inefficient_df)/len(df)) * 100)
 
 
-# -----------------------
-# Executive Overview Page
-# -----------------------
+# ======================================================
+# EXECUTIVE OVERVIEW
+# ======================================================
 if page == "Executive Overview":
 
     st.title("📊 Executive Energy Overview")
+
+    st.markdown("### 🤖 Machine Learning Engine")
+    st.info(
+        "Prediction models built using Scikit-Learn (Random Forest Regression) "
+        "to forecast energy consumption and support scenario-based optimization."
+    )
+
+    with st.expander("View Model Details"):
+        st.write("""
+        - Algorithm: Random Forest Regressor  
+        - Library: Scikit-Learn  
+        - Features Used: Hour, Temperature, Occupancy, Weekend Indicator  
+        - Training Split: 80/20  
+        - Purpose: Predict future energy demand and optimize building performance  
+        """)
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Predicted Energy (kWh)", round(predicted_energy, 2))
     col2.metric("Predicted Cost (₹)", round(predicted_cost, 2))
     col3.metric("Efficiency Score", f"{efficiency_score}/100")
 
-    st.subheader("🏭 Industry Benchmark Comparison")
 
-    industry_avg = actual_energy * 1.15
-    benchmark_diff = predicted_energy - industry_avg
-
-    st.metric(
-        "Industry Benchmark Energy (kWh)",
-        round(industry_avg, 2),
-        delta=round(benchmark_diff, 2),
-        delta_color="inverse"
-    )
-
-    comparison_text = "more efficient" if predicted_energy < industry_avg else "less efficient"
-    st.info(f"Your system is {comparison_text} compared to industry average.")
-
-
-# -----------------------
-# Optimization Page
-# -----------------------
+# ======================================================
+# OPTIMIZATION
+# ======================================================
 elif page == "Optimization":
 
     st.title("⚡ Optimization Insights")
@@ -127,21 +185,13 @@ elif page == "Optimization":
     optimized_cost = optimized_energy * cost_per_kwh
 
     colA, colB = st.columns(2)
-    colA.metric("Optimized Energy Target (kWh)", round(optimized_energy, 2))
+    colA.metric("Optimized Energy Target", round(optimized_energy, 2))
     colB.metric("Optimized Cost Target (₹)", round(optimized_cost, 2))
 
-    st.markdown("### 💡 Recommended Actions")
-    st.markdown("""
-    - Optimize HVAC setpoints  
-    - Introduce occupancy sensors  
-    - Reduce after-hours consumption  
-    - Implement predictive maintenance  
-    """)
 
-
-# -----------------------
-# Climate Page
-# -----------------------
+# ======================================================
+# CLIMATE
+# ======================================================
 elif page == "Climate":
 
     st.title("🌍 Climate Impact")
@@ -150,21 +200,30 @@ elif page == "Climate":
     col1.metric("Projected CO₂ Emissions (kg)", round(predicted_emissions, 2))
     col2.metric("Trees Required for Offset", int(round(trees_required, 0)))
 
-    st.progress(min(predicted_emissions / (actual_energy * emission_factor * 1.3), 1))
+
+# ======================================================
+# USAGE ANALYZER
+# ======================================================
+elif page == "Usage Analyzer":
+
+    st.title("📈 Advanced Energy Forecasting")
+
+    historical_df = base_df.tail(7 * 24).copy()
+    st.line_chart(historical_df["energy_kwh"])
 
 
-# -----------------------
-# Technical Dashboard
-# -----------------------
+# ======================================================
+# TECHNICAL DASHBOARD
+# ======================================================
 elif page == "Technical Dashboard":
 
     st.title("🔬 Technical Energy Dashboard")
     render_dashboard(df)
 
 
-# -----------------------
-# PDF Report Generator
-# -----------------------
+# ======================================================
+# PDF EXPORT
+# ======================================================
 st.sidebar.markdown("---")
 
 if st.sidebar.button("Download Executive PDF Report"):
@@ -175,16 +234,12 @@ if st.sidebar.button("Download Executive PDF Report"):
 
     elements.append(Paragraph("EnergySense Executive Report", styles["Heading1"]))
     elements.append(Spacer(1, 0.3 * inch))
-
     elements.append(Paragraph(f"Predicted Energy: {round(predicted_energy, 2)} kWh", styles["Normal"]))
     elements.append(Spacer(1, 0.2 * inch))
-
     elements.append(Paragraph(f"Predicted Cost: ₹{round(predicted_cost, 2)}", styles["Normal"]))
     elements.append(Spacer(1, 0.2 * inch))
-
     elements.append(Paragraph(f"CO₂ Emissions: {round(predicted_emissions, 2)} kg", styles["Normal"]))
     elements.append(Spacer(1, 0.2 * inch))
-
     elements.append(Paragraph(f"Trees Required for Offset: {int(round(trees_required, 0))}", styles["Normal"]))
 
     doc.build(elements)
