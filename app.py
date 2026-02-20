@@ -16,7 +16,6 @@ def main():
     model = train_model(base_df)
 
     base_df["prediction"] = predict_energy(model, base_df)
-    baseline_energy = base_df["prediction"].sum()
 
     # -----------------------
     # What-If Scenario Simulator
@@ -31,50 +30,67 @@ def main():
     df = base_df.copy()
 
     # Apply occupancy adjustment
-    df["occupancy"] = df["occupancy"] * (1 + occupancy_increase / 100)
+    df["occupancy"] *= (1 + occupancy_increase / 100)
 
-    # Apply extended hours
+    # Extend working hours impact
     if extra_hours > 0:
         extended_mask = df["hour"].between(18, 18 + extra_hours)
         df.loc[extended_mask, "occupancy"] *= 1.2
 
-    # Apply HVAC adjustment via temperature
-    df["temperature"] = df["temperature"] * (1 + hvac_adjustment / 100)
+    # HVAC adjustment via temperature
+    df["temperature"] *= (1 + hvac_adjustment / 100)
 
     # Predict new energy
     df["prediction"] = predict_energy(model, df)
 
-    # Detect inefficiencies
+    # Detect inefficiency
     df = detect_inefficiency(df)
 
-    scenario_energy = df["prediction"].sum()
-    energy_change = scenario_energy - baseline_energy
+    # -----------------------
+    # Energy Performance Overview
+    # -----------------------
+    st.markdown("## 📊 Energy Performance Overview")
 
-    # -----------------------
-    # Business Impact
-    # -----------------------
-    st.markdown("### 📊 Business Impact")
+    actual_energy = base_df["energy_kwh"].sum()
+    predicted_energy = df["prediction"].sum()
+    energy_difference = predicted_energy - actual_energy
 
     cost_per_kwh = 8
-    scenario_cost = scenario_energy * cost_per_kwh
-    baseline_cost = baseline_energy * cost_per_kwh
-    cost_change = scenario_cost - baseline_cost
+    actual_cost = actual_energy * cost_per_kwh
+    predicted_cost = predicted_energy * cost_per_kwh
+    cost_difference = predicted_cost - actual_cost
 
     col1, col2 = st.columns(2)
 
-    col1.metric(
-        "Predicted Total Energy (kWh)",
-        round(scenario_energy, 2),
-        delta=round(energy_change, 2),
-        delta_color="inverse"
-    )
+    with col1:
+        st.markdown("### ⚡ Energy Comparison")
 
-    col2.metric(
-        "Estimated Cost Impact (₹)",
-        round(scenario_cost, 2),
-        delta=round(cost_change, 2),
-        delta_color="inverse"
-    )
+        st.metric(
+            "Actual Total Energy (kWh)",
+            round(actual_energy, 2)
+        )
+
+        st.metric(
+            "Predicted Total Energy (kWh)",
+            round(predicted_energy, 2),
+            delta=round(energy_difference, 2),
+            delta_color="inverse"
+        )
+
+    with col2:
+        st.markdown("### 💰 Cost Comparison")
+
+        st.metric(
+            "Actual Energy Cost (₹)",
+            round(actual_cost, 2)
+        )
+
+        st.metric(
+            "Predicted Energy Cost (₹)",
+            round(predicted_cost, 2),
+            delta=round(cost_difference, 2),
+            delta_color="inverse"
+        )
 
     # -----------------------
     # Climate Impact Analyzer
@@ -82,22 +98,22 @@ def main():
     st.markdown("## 🌍 Climate Impact Analyzer")
     st.caption("Measure carbon footprint impact of operational decisions.")
 
-    emission_factor = 0.82  # kg CO2 per kWh
+    emission_factor = 0.82  # kg CO2 per kWh (India average)
 
-    baseline_emissions = baseline_energy * emission_factor
-    scenario_emissions = scenario_energy * emission_factor
-    emission_change = scenario_emissions - baseline_emissions
+    actual_emissions = actual_energy * emission_factor
+    predicted_emissions = predicted_energy * emission_factor
+    emission_change = predicted_emissions - actual_emissions
 
     colA, colB = st.columns(2)
 
     colA.metric(
         "Projected CO₂ Emissions (kg)",
-        round(scenario_emissions, 2),
+        round(predicted_emissions, 2),
         delta=round(emission_change, 2),
         delta_color="inverse"
     )
 
-    trees_equivalent = scenario_emissions / 21
+    trees_equivalent = predicted_emissions / 21
     colB.metric(
         "Equivalent Trees Required",
         round(trees_equivalent, 1)
@@ -124,7 +140,6 @@ def main():
         )
 
         st.markdown("### 🔧 Suggested Actions")
-
         st.markdown(
             "- Adjust HVAC scheduling during low occupancy hours.\n"
             "- Reduce cooling/heating load after working hours.\n"
