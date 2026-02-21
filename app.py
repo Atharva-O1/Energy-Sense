@@ -98,7 +98,7 @@ intensity = st.selectbox("Energy Intensity",
                          ["Low", "Medium", "High"])
 
 # =====================================================
-# ENERGY SCALING
+# DATA + SCALING
 # =====================================================
 
 df = generate_data()
@@ -116,7 +116,7 @@ multiplier = (
 df["energy_kwh"] *= multiplier
 
 # =====================================================
-# REAL ML TRAIN/TEST SPLIT
+# ML VALIDATION
 # =====================================================
 
 X = df.drop(["energy_kwh"], axis=1)
@@ -137,15 +137,26 @@ model_accuracy = r2_score(y_test, preds_test)
 df = detect_inefficiency(df)
 
 # =====================================================
-# METRICS
+# METRICS CALCULATION
 # =====================================================
 
 total_energy = df["energy_kwh"].sum()
 predicted_energy = df["prediction"].sum()
+
+energy_diff = predicted_energy - total_energy
+energy_percent = (energy_diff / total_energy) * 100 if total_energy else 0
+
 peak_load = df["prediction"].max()
 avg_load = df["prediction"].mean()
+peak_diff = peak_load - avg_load
+peak_percent = (peak_diff / avg_load) * 100 if avg_load else 0
 peak_ratio = peak_load / avg_load
+
 load_variance = df["prediction"].std()
+baseline_variance = df["energy_kwh"].std()
+variance_diff = load_variance - baseline_variance
+variance_percent = (variance_diff / baseline_variance) * 100 if baseline_variance else 0
+
 energy_per_sqm = total_energy / area
 
 # =====================================================
@@ -155,9 +166,16 @@ energy_per_sqm = total_energy / area
 st.subheader("📊 Energy Overview")
 
 colA, colB, colC = st.columns(3)
+
 colA.metric("Total Energy (kWh)", round(total_energy, 2))
-colB.metric("Predicted Energy (kWh)", round(predicted_energy, 2))
-colC.metric("Peak Load (kWh)", round(peak_load, 2))
+
+colB.metric("Predicted Energy (kWh)",
+            round(predicted_energy, 2),
+            delta=f"{round(energy_diff,2)} ({round(energy_percent,2)}%)")
+
+colC.metric("Peak Load (kWh)",
+            round(peak_load, 2),
+            delta=f"{round(peak_diff,2)} ({round(peak_percent,2)}%)")
 
 colD, colE = st.columns(2)
 colD.metric("Energy Intensity (kWh/sqm)", round(energy_per_sqm, 2))
@@ -171,7 +189,9 @@ st.line_chart(df[["energy_kwh", "prediction"]])
 
 st.subheader("⚡ Peak Risk")
 
-st.metric("Load Variability Index", round(load_variance, 2))
+st.metric("Load Variability Index",
+          round(load_variance, 2),
+          delta=f"{round(variance_diff,2)} ({round(variance_percent,2)}%)")
 
 if peak_ratio > 1.5:
     st.error("High Peak Risk")
@@ -188,40 +208,24 @@ st.subheader("🌍 Climate Impact")
 
 emissions = total_energy * 0.82
 trees = emissions / 21
-
 carbon_price = 85
 carbon_cost = (emissions / 1000) * carbon_price
 
+baseline_emissions = predicted_energy * 0.82
+emission_diff = emissions - baseline_emissions
+emission_percent = (emission_diff / baseline_emissions) * 100 if baseline_emissions else 0
+
 col1, col2, col3 = st.columns(3)
-col1.metric("CO₂ Emissions (kg)", round(emissions, 2))
+
+col1.metric("CO₂ Emissions (kg)",
+            round(emissions, 2),
+            delta=f"{round(emission_diff,2)} ({round(emission_percent,2)}%)")
+
 col2.metric("Trees Required", round(trees, 1))
 col3.metric("Carbon Cost (₹)", round(carbon_cost, 2))
 
 # =====================================================
-# CLIMATE CHANGE ANALYZER
-# =====================================================
-
-st.subheader("🌡 Climate Change Impact Analyzer")
-
-temp_rise = st.slider("Global Temp Rise (°C)", 0.0, 5.0, 1.0, 0.1)
-
-climate_sensitivity = {
-    "Office": 0.03,
-    "Educational": 0.025,
-    "Mall": 0.05,
-    "Hospital": 0.045
-}
-
-climate_factor = 1 + (temp_rise * climate_sensitivity[building_type])
-
-st.metric(
-    "Future Energy (kWh)",
-    round(total_energy * climate_factor, 2),
-    delta=round(total_energy * (climate_factor - 1), 2)
-)
-
-# =====================================================
-# WHAT IF
+# WHAT-IF SIMULATION
 # =====================================================
 
 st.subheader("🔮 What-If Simulation")
@@ -231,34 +235,56 @@ hypo = st.number_input("Hypothetical Energy (kWh)",
                        float(total_energy))
 
 if st.button("Run What-If Simulation"):
-    st.metric("Projected Cost (₹)", round(hypo * 8, 2))
-    st.metric("Projected CO₂ (kg)", round(hypo * 0.82, 2))
+
+    cost_now = total_energy * 8
+    cost_future = hypo * 8
+    cost_diff = cost_future - cost_now
+    cost_percent = (cost_diff / cost_now) * 100 if cost_now else 0
+
+    co2_now = total_energy * 0.82
+    co2_future = hypo * 0.82
+    co2_diff = co2_future - co2_now
+    co2_percent = (co2_diff / co2_now) * 100 if co2_now else 0
+
+    st.metric("Projected Cost (₹)",
+              round(cost_future, 2),
+              delta=f"{round(cost_diff,2)} ({round(cost_percent,2)}%)")
+
+    st.metric("Projected CO₂ (kg)",
+              round(co2_future, 2),
+              delta=f"{round(co2_diff,2)} ({round(co2_percent,2)}%)")
 
 # =====================================================
-# MANUAL ANALYZER
+# HVAC SYSTEM OPTIMIZER
 # =====================================================
 
-st.subheader("🧠 Manual Energy Consumption Analyzer")
+st.subheader("❄️ HVAC System Optimizer")
 
-user_energy = st.number_input(
-    "Enter Energy Consumed (kWh)",
-    min_value=0.0,
-    step=50.0
-)
+hvac_energy_current = total_energy * 0.40
+best_hvac = min(hvac_map, key=hvac_map.get)
 
-if st.button("Run Manual Analysis"):
+if hvac_map[hvac_type] > hvac_map[best_hvac]:
 
-    predicted_next = user_energy * 1.05
-    cost_estimate = user_energy * 8
-    emissions_estimate = user_energy * 0.82
+    efficiency_gain_ratio = (hvac_map[hvac_type] - hvac_map[best_hvac]) / hvac_map[hvac_type]
+    hvac_energy_saved = hvac_energy_current * efficiency_gain_ratio
+
+    savings_percent = (hvac_energy_saved / total_energy) * 100 if total_energy else 0
+    cost_savings = hvac_energy_saved * 8
+    emission_savings = hvac_energy_saved * 0.82
 
     col1, col2, col3 = st.columns(3)
 
-    col1.metric("Predicted Next Period (kWh)",
-                round(predicted_next, 2),
-                delta=round(predicted_next - user_energy, 2))
-    col2.metric("Estimated Cost (₹)", round(cost_estimate, 2))
-    col3.metric("CO₂ Emissions (kg)", round(emissions_estimate, 2))
+    col1.metric("Potential Energy Savings (kWh)",
+                round(hvac_energy_saved, 2),
+                delta=f"-{round(savings_percent,2)}%")
+
+    col2.metric("Estimated Cost Savings (₹)", round(cost_savings, 2))
+    col3.metric("CO₂ Reduction (kg)", round(emission_savings, 2))
+
+    st.info(f"Recommended Upgrade: Switch to {best_hvac}")
+
+else:
+    st.success("Current HVAC system is already optimized.")
 
 # =====================================================
 # OPTIMIZATION ENGINE
@@ -270,25 +296,40 @@ recommendations = []
 
 if peak_ratio > 1.5:
     recommendations.append("Implement demand response and load shifting.")
-
 if hvac_type == "Central HVAC":
     recommendations.append("Introduce HVAC zoning and automation.")
-
 if intensity == "High":
     recommendations.append("Upgrade to high-efficiency systems.")
-
 if df["inefficiency_flag"].sum() > 10:
     recommendations.append("Automate low-occupancy scheduling.")
 
-if temp_rise > 2.5:
-    recommendations.append("Prepare adaptive cooling strategies.")
-
-if len(recommendations) == 0:
-    st.success("System operating within optimal efficiency.")
-else:
+if recommendations:
     with st.expander("📋 View Optimization Plan"):
         for rec in recommendations:
             st.write("•", rec)
+else:
+    st.success("System operating within optimal efficiency.")
+
+# =====================================================
+# MANUAL ANALYZER
+# =====================================================
+
+st.subheader("🧠 Manual Energy Consumption Analyzer")
+
+user_energy = st.number_input("Enter Energy Consumed (kWh)", min_value=0.0, step=50.0)
+
+if st.button("Run Manual Analysis"):
+
+    predicted_next = user_energy * 1.05
+    cost_estimate = user_energy * 8
+    emissions_estimate = user_energy * 0.82
+
+    st.metric("Predicted Next Period (kWh)",
+              round(predicted_next, 2),
+              delta=round(predicted_next - user_energy, 2))
+
+    st.metric("Estimated Cost (₹)", round(cost_estimate, 2))
+    st.metric("CO₂ Emissions (kg)", round(emissions_estimate, 2))
 
 # =====================================================
 # FULL PDF REPORT
@@ -305,22 +346,7 @@ def generate_pdf():
 
     elements.append(Paragraph("EnergySense Executive Report", styles["Heading1"]))
     elements.append(Spacer(1, 20))
-    elements.append(Paragraph(f"Generated: {datetime.now()}",
-                              styles["Normal"]))
-    elements.append(Spacer(1, 20))
-
-    elements.append(Paragraph("Building Configuration", styles["Heading2"]))
-    elements.append(Paragraph(
-        f"""
-        Type: {building_type}<br/>
-        Area: {area} sqm<br/>
-        Floors: {floors}<br/>
-        HVAC: {hvac_type}<br/>
-        Intensity: {intensity}
-        """,
-        styles["Normal"]
-    ))
-
+    elements.append(Paragraph(f"Generated: {datetime.now()}", styles["Normal"]))
     elements.append(Spacer(1, 20))
 
     chart_path = "energy_chart.png"
@@ -342,18 +368,10 @@ def generate_pdf():
         Peak Load: {round(peak_load,2)} kWh<br/>
         CO₂ Emissions: {round(emissions,2)} kg<br/>
         Carbon Cost: {round(carbon_cost,2)} ₹<br/>
-        Trees Required: {round(trees,1)}<br/>
         Model Accuracy (R²): {round(model_accuracy,3)}
         """,
         styles["Normal"]
     ))
-
-    if recommendations:
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph("Optimization Recommendations",
-                                  styles["Heading2"]))
-        for rec in recommendations:
-            elements.append(Paragraph(f"• {rec}", styles["Normal"]))
 
     doc.build(elements)
 
@@ -369,3 +387,5 @@ if st.button("Generate Detailed PDF Report"):
                            f,
                            file_name="EnergySense_Report.pdf",
                            mime="application/pdf")
+
+
